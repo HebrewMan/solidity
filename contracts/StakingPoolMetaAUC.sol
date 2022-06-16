@@ -38,8 +38,10 @@ contract StakingPoolAFICLP is Ownable{
         //授权AUC NFT
         //燃烧 1000 AUC
         //到期之后才能 解押 期间无法领取收益
-        
+
     }
+
+    function getUserAllStakingList()external{}
          
     
 
