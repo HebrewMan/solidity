@@ -43,7 +43,6 @@ contract StakingPoolAFICLP is Ownable{
 
     function getUserAllStakingList()external{}
          
-    
 
     /* 10 公式： 日收益 = 质押数量 * 日收益率 * 收益系数 */
     // function _computeStakingRewardAmount(UserStakingInfo memory _OrderInfo) private view returns (uint256){

@@ -300,7 +300,7 @@ contract StakingRewards is StakingHelper{
         uint256 startingAmount; //到期之前的收益
         uint256 afterAmount; //到期之后的收益
 
-        isStopStaking == false? callTime = block.timestamp:callTime=lastStakingTime;
+        isStopStaking == false? callTime = block.timestamp:callTime=stopStakingTime;
 
         if (_OrderInfo.endTime > block.timestamp) {
             if (_OrderInfo.hadRewardAmount > 0) {

@@ -2,7 +2,8 @@
 pragma solidity ^0.8.0;
 import "./StakingHelper.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
-contract StakingRewards is StakingHelper{
+//主网版本
+contract StakingPoolAUC is StakingHelper{
     using SafeMath for uint256;
     using SafeMath for uint16;
 
@@ -51,7 +52,7 @@ contract StakingRewards is StakingHelper{
         address user;
         uint16 stakedDays; //质押类型 多少天（测试环境 分钟）
         uint32 orderId; // 订单id
-        uint32 apy; //当前收益率
+        uint256 apy; //当前收益率
         uint256 startingTime; //质押开始时间
         uint256 endTime; //质押结束时间
         uint256 lastTime; //最近一次更新的时间
@@ -67,7 +68,7 @@ contract StakingRewards is StakingHelper{
         UserStakingInfo memory OrderInfo;
         OrderInfo.user = _msgSender();
         OrderInfo.startingTime = block.timestamp;
-        OrderInfo.endTime = block.timestamp + _days.mul(86400); //测试环境 分钟 * 60秒。 （min）正式需要* 86400秒
+        OrderInfo.endTime = block.timestamp + _days.mul(86400); //测试环境 分钟 * 60秒。 （min）正式需要* 86400 秒
         OrderInfo.orderId = counter;
 
         OrderInfo.stakedDays = _days;
@@ -90,6 +91,7 @@ contract StakingRewards is StakingHelper{
     function withdraw(uint32 _orderId) external checkOrderIsExist(_orderId) {
         UserStakingInfo[] storage orderList = userToStakingList[_msgSender()];
         UserStakingInfo memory OrderInfo = userToCurrtentStaking[_msgSender()][_orderId];
+        require(isStopStaking == true|| OrderInfo.endTime<=block.timestamp,"StakingPool: Does not meet the release conditions");
 
         uint256 rewardAmount = _computeStakingRewardAmount(OrderInfo);
         userToTotalInfo[_msgSender()].hadRewardAmount += rewardAmount;
@@ -146,7 +148,7 @@ contract StakingRewards is StakingHelper{
 
         emit Claimed(_orderId, rewardAmount);
     }
-
+    //出矿停止之后 claimAll 更新了 lastTime 计算会报错 等于负数。
     function claimAll() external checkStakingState checkUserIsStaked(_msgSender()){
         UserStakingTotalInfo memory TotalInfo = getUserStakingTotalInfo();
         UserStakingInfo[] storage orderList = userToStakingList[_msgSender()];
@@ -159,6 +161,7 @@ contract StakingRewards is StakingHelper{
                     orderList[k].rewardPerSecondToken = 0;
                 }
                 orderList[k].lastTime = block.timestamp;
+                userToCurrtentStaking[_msgSender()][orderList[k].orderId] = orderList[k];
 
                 if(orderList[k].orderId == poolList[i].orderId){
                     poolList[i] = orderList[k];
@@ -212,7 +215,7 @@ contract StakingRewards is StakingHelper{
         return true;
     }
 
-    function setApys(uint16[5] memory _apys) external  onlyOwner returns(bool){
+    function setApys(uint256[5] memory _apys) external  onlyOwner returns(bool){
         stakingApys=_apys;
         dayToApy[30] = stakingApys[0];
         dayToApy[60] = stakingApys[1];
@@ -249,7 +252,11 @@ contract StakingRewards is StakingHelper{
 
     function getRemainingReward() external view returns (uint256) {
         uint256 total = RREWARD_TOKEN.balanceOf(address(this));
-        return total.sub(_getUsersTotalRewards()); //需要 减去 可领取的。
+        if(total>_getUsersTotalRewards()){
+            return total.sub(_getUsersTotalRewards()); //需要 减去 可领取的。
+        }else{
+            return 0;
+        }
     }
 
     function getPoolAllList() external view returns (UserStakingInfo[] memory orderList) {
@@ -290,7 +297,7 @@ contract StakingRewards is StakingHelper{
         uint256 startingAmount; //到期之前的收益
         uint256 afterAmount; //到期之后的收益
 
-        isStopStaking == false? callTime = block.timestamp:callTime=lastStakingTime;
+        isStopStaking == false? callTime = block.timestamp:callTime=stopStakingTime;
 
         if (_OrderInfo.endTime > block.timestamp) {
             if (_OrderInfo.hadRewardAmount > 0) {

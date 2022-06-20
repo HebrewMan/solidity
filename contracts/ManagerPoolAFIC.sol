@@ -9,6 +9,9 @@ contract ManagerPoolAFIC is Ownable{
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
     using SafeMath for uint16;
+
+    bool public isStopStaking;
+    uint256 internal stopStakingTime;
          
     uint32 internal counter = 0;//记录订单id
     uint8 internal denominator = 100;//分母用来计算
@@ -19,9 +22,9 @@ contract ManagerPoolAFIC is Ownable{
     IERC20 public constant RREWARD_TOKEN = IERC20(0x0F1867D0681F618c00d3Eeba563ce75ABDcbDEdD);//AUC
     IStakingPoolAFIC internal StakingAFIC = IStakingPoolAFIC(AFIC_POOL_ADDR);
 
-    uint16[4] public stakingApys = [1000,2000,3000,4000];
+    uint256[4] public stakingApys = [100000000,200000000,300000000,400000000];
 
-    mapping(uint16 => uint16) public dayToApy;
+    mapping(uint16 => uint256) public dayToApy;
  
     mapping(address => UserStakingInfo[]) internal userToStakingList; //address to all user's staking order.
     mapping(address => mapping(uint32 => UserStakingInfo)) internal userToCurrtentStaking; //address to current user staked info.
@@ -55,6 +58,11 @@ contract ManagerPoolAFIC is Ownable{
         require(RREWARD_TOKEN.balanceOf(address(this)) >= _getUsersTotalRewards(),"RREWARD_TOKEN: Insufficient pool balance");
         _;
     }
+
+    modifier checkStakingState(){
+         require(isStopStaking == false,"StakingPool: Staking mining is over");
+         _;
+    }
     
     struct UserStakingTotalInfo {
         uint256 stakedAmount; //质押总量
@@ -66,7 +74,7 @@ contract ManagerPoolAFIC is Ownable{
         address user;
         uint16 stakedDays; //质押类型 多少天（测试环境 分钟）
         uint32 orderId; // 订单id
-        uint32 apy; //当前收益率
+        uint256 apy; //当前收益率
         uint256 startingTime; //质押开始时间
         uint256 endTime; //质押结束时间
         uint256 lastTime; //最近一次更新的时间
@@ -76,7 +84,7 @@ contract ManagerPoolAFIC is Ownable{
         uint256 rewardPerSecondToken; //用户的每单位(秒) token 奖励数
     }
 
-    function stake(uint16 _days, uint256 _amount) external checkPoolBlanceOf {
+    function stake(uint16 _days, uint256 _amount) external checkStakingState checkPoolBlanceOf {
         counter++;
         UserStakingInfo memory OrderInfo;
         OrderInfo.user = _msgSender();
@@ -108,7 +116,7 @@ contract ManagerPoolAFIC is Ownable{
     function withdraw(uint32 _orderId) external checkOrderIsExist(_orderId) {
         UserStakingInfo[] storage orderList = userToStakingList[_msgSender()];
         UserStakingInfo memory OrderInfo = userToCurrtentStaking[_msgSender()][_orderId];
-        require(OrderInfo.endTime<=block.timestamp,"The current order has not expired");
+        require(isStopStaking == true|| OrderInfo.endTime<=block.timestamp,"StakingPool: Does not meet the release conditions");
 
         uint256 rewardAmount = _computeStakingRewardAmount(OrderInfo);
         userToTotalInfo[_msgSender()].hadRewardAmount += rewardAmount;
@@ -168,12 +176,14 @@ contract ManagerPoolAFIC is Ownable{
     function claimAll() external checkUserIsStaked(_msgSender()){
         UserStakingTotalInfo memory TotalInfo = getUserStakingTotalInfo();
         UserStakingInfo[] storage orderList = userToStakingList[_msgSender()];
-
+        //userToStakingList 状态需要更新
         for (uint256 i; i < poolList.length; i++) {
 
             for (uint256 k; k < orderList.length; k++) {
                 orderList[k].hadRewardAmount += _computeStakingRewardAmount(orderList[k]);
                 orderList[k].lastTime = block.timestamp;
+
+                userToCurrtentStaking[_msgSender()][orderList[k].orderId] = orderList[k];
 
                 if(orderList[k].orderId == poolList[i].orderId){
                     poolList[i] = orderList[k];
@@ -192,7 +202,7 @@ contract ManagerPoolAFIC is Ownable{
         RREWARD_TOKEN.safeTransfer(msg.sender, amount);
     }
 
-    function setApys(uint16[4] memory _apys) external  onlyOwner returns(bool){
+    function setApys(uint256[4] memory _apys) external  onlyOwner returns(bool){
         stakingApys=_apys;
         // dayToApy[1] = stakingApys[0];
         // dayToApy[3] = stakingApys[1];
@@ -204,6 +214,12 @@ contract ManagerPoolAFIC is Ownable{
         dayToApy[40] = stakingApys[3];
 
         _settlementOfUsersRewards();
+        return true;
+    }
+
+    function setStakingSwitch(bool _state) external onlyOwner returns(bool){
+        stopStakingTime = block.timestamp;
+        isStopStaking = _state;
         return true;
     }
 
@@ -235,7 +251,7 @@ contract ManagerPoolAFIC is Ownable{
         return true;
     }
 
-    function getApys() external view returns(uint16[4] memory){
+    function getApys() external view returns(uint256[4] memory){
         return stakingApys;
     }
 
@@ -253,7 +269,11 @@ contract ManagerPoolAFIC is Ownable{
 
     function getRemainingReward() external view returns (uint256) {
         uint256 total = RREWARD_TOKEN.balanceOf(address(this));
-        return total.sub(_getUsersTotalRewards()); //需要 减去 可领取的。
+        if(total>_getUsersTotalRewards()){
+            return total.sub(_getUsersTotalRewards()); //需要 减去 可领取的。
+        }else{
+            return 0;
+        }
     }
 
     function getPoolAllList() external view returns (UserStakingInfo[] memory orderList) {
@@ -298,7 +318,14 @@ contract ManagerPoolAFIC is Ownable{
         uint256 callTime;
         uint256 computeTime;
 
-        _OrderInfo.endTime <= block.timestamp? callTime = _OrderInfo.endTime : callTime = block.timestamp;
+        // isStopStaking == false? callTime = block.timestamp:callTime=stopStakingTime;
+
+        if(isStopStaking == false){
+            _OrderInfo.endTime <= block.timestamp? callTime = _OrderInfo.endTime : callTime = block.timestamp;
+        }else{
+            _OrderInfo.endTime < stopStakingTime? callTime = _OrderInfo.endTime : callTime = stopStakingTime;
+        }
+
         _OrderInfo.hadRewardAmount > 0? computeTime =  _OrderInfo.lastTime : computeTime = _OrderInfo.startingTime;
         //lastTime > endTIme;
         if(computeTime>callTime){
@@ -306,7 +333,6 @@ contract ManagerPoolAFIC is Ownable{
         }else{
             RewardsAmount = (callTime - computeTime).mul( _OrderInfo.rewardPerSecondToken);
         }
-
         return RewardsAmount;
     }
     /*========== EVENTS =========*/
