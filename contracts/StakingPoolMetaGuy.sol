@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
-
+import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Enumerable.sol";
 contract StakingPoolMetaGuy is Ownable,ERC721Holder{
 
     using SafeERC20 for IERC20;
@@ -17,7 +17,7 @@ contract StakingPoolMetaGuy is Ownable,ERC721Holder{
     IERC20 public AUC = IERC20(0x3e0aDEb80331e26cF38aF17D6E638fCEB3BA455c);
     IERC20 public GEE = IERC20(0x942647E070c5D7ADcaB2Fc6a952Abb1EF9066966);
 
-    address immutable deadAddr = 0x000000000000000000000000000000000000dEaD;
+    address internal immutable deadAddr = 0x000000000000000000000000000000000000dEaD;
 
     mapping (address => mapping( uint8 => OrderInfo )) public userToIdToOrder;
 
@@ -47,8 +47,7 @@ contract StakingPoolMetaGuy is Ownable,ERC721Holder{
         _OrderInfo.price = _price;
         _OrderInfo.orderId = _id;
         _OrderInfo.endTime = block.timestamp + 30*60; //测试环境 分钟 * 60秒。 （min）正式需要 *30* 86400秒
-        //rewards 1000 * 10 * 3 * 85% = 25500 GEE ：GEE 收益 = 1000 *（AUC价格 / GEE价格）* 收益倍数  收益：用户到账85%，销毁15%
-        _OrderInfo.rewardAmount = 1000*_price*(_id+1)*85/100;
+        _OrderInfo.rewardAmount = 1000*(_id+1)*_price;
         _OrderInfo.stakedNFTs = _tokenIds;
 
         _PoolOrders.push(_OrderInfo);
@@ -69,7 +68,7 @@ contract StakingPoolMetaGuy is Ownable,ERC721Holder{
         OrderInfo[] storage UserOrders = userToOrders[_msgSender()];
         require(_msgSender() == _OrderInfo.user,"The caller is not the owner of the order");
         require(GEE.balanceOf(address(this))>_OrderInfo.rewardAmount,"This pool GEE token is below");
-        // require(_OrderInfo.endTime<=block.timestamp,"The current order has not expired");
+        require(_OrderInfo.endTime<=block.timestamp,"The current order has not expired");
 
         for(uint i;i<_OrderInfo.stakedNFTs.length;i++){
             NFT.safeTransferFrom(address(this), _msgSender(), _OrderInfo.stakedNFTs[i]);
@@ -93,7 +92,7 @@ contract StakingPoolMetaGuy is Ownable,ERC721Holder{
 
         GEE.safeTransfer(_msgSender(),_OrderInfo.rewardAmount);
 
-        AUC.safeTransfer(deadAddr,1000*1e8);
+        AUC.safeTransfer(deadAddr,950*1e8);
         
         delete userToIdToOrder[_msgSender()][_orderId];
     }
@@ -106,8 +105,16 @@ contract StakingPoolMetaGuy is Ownable,ERC721Holder{
         return userToOrders[_msgSender()];
     }
 
-    function onERC721Received(address _operator, address _from, uint256 _tokenId, bytes memory _data) public override returns(bytes4){
-        return this.onERC721Received.selector;
+    function getUserTokenIds(address _user) public view returns(uint [] memory ) {
+        IERC721Enumerable _NFT = IERC721Enumerable(0x50B7F926D06dD860ee40dBE25A5E9Ecd906608C6);
+
+        uint length = NFT.balanceOf(_user);
+        uint[] memory tokenIds = new uint[](length);
+
+        for(uint i = 0; i< length; i++) {
+            tokenIds[i] = _NFT.tokenOfOwnerByIndex(_user,i);
+        }
+        return tokenIds;
     }
          
 }
